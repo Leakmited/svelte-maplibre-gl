@@ -413,6 +413,9 @@
 	});
 
 	// Map Options (reactive)
+	// Parent $effects run before child $effects in the same flush. Defer camera
+	// updates to a microtask so source setTiles/setUrl (and other child effects)
+	// apply first when props like tiles and zoom change together.
 	$effect(() => {
 		center;
 		zoom;
@@ -422,59 +425,70 @@
 		elevation;
 		padding;
 		if (!firstRun && map) {
-			const camera = getCamera(map);
-			const tr = getUpdateTransform(camera);
-			let jumpTo: maplibregl.JumpToOptions = {};
-			let changed = false;
+			let cancelled = false;
+			queueMicrotask(() => {
+				if (cancelled || !map) {
+					return;
+				}
 
-			function notAlmostEqual(a: number, b: number) {
-				// The globe projection causes rounding errors, so we need to allow for a small difference
-				return Math.abs(a - b) > 1e-14;
-			}
+				const camera = getCamera(map);
+				const tr = getUpdateTransform(camera);
+				let jumpTo: maplibregl.JumpToOptions = {};
+				let changed = false;
 
-			if (center) {
-				const _center = maplibregl.LngLat.convert(center);
-				if (notAlmostEqual(tr.center.lat, _center.lat) || notAlmostEqual(tr.center.lng, _center.lng)) {
-					jumpTo.center = center;
+				function notAlmostEqual(a: number, b: number) {
+					// The globe projection causes rounding errors, so we need to allow for a small difference
+					return Math.abs(a - b) > 1e-14;
+				}
+
+				if (center) {
+					const _center = maplibregl.LngLat.convert(center);
+					if (notAlmostEqual(tr.center.lat, _center.lat) || notAlmostEqual(tr.center.lng, _center.lng)) {
+						jumpTo.center = center;
+						changed = true;
+					}
+				}
+				if (zoom !== undefined && notAlmostEqual(tr.zoom, zoom)) {
+					jumpTo.zoom = zoom;
 					changed = true;
 				}
-			}
-			if (zoom !== undefined && notAlmostEqual(tr.zoom, zoom)) {
-				jumpTo.zoom = zoom;
-				changed = true;
-			}
-			if (bearing !== undefined && notAlmostEqual(tr.bearing, bearing)) {
-				jumpTo.bearing = bearing;
-				changed = true;
-			}
-			if (pitch !== undefined && tr.pitch !== pitch) {
-				jumpTo.pitch = pitch;
-				changed = true;
-			}
-			if (roll !== undefined && tr.roll !== roll) {
-				jumpTo.roll = roll;
-				changed = true;
-			}
-			if (elevation !== undefined && tr.elevation !== elevation) {
-				jumpTo.elevation = elevation;
-				changed = true;
-			}
-			if (padding && !tr.isPaddingEqual(padding)) {
-				jumpTo.padding = padding;
-				changed = true;
-			}
-
-			if (changed) {
-				// Temporarily replace the camera's `stop` with `_stop(allowGestures: true)` so that
-				// ongoing gestures survive the `jumpTo` below.
-				const originalStop = camera.stop;
-				camera.stop = () => camera._stop(true);
-				try {
-					map.jumpTo(jumpTo, { reactivity: true });
-				} finally {
-					camera.stop = originalStop;
+				if (bearing !== undefined && notAlmostEqual(tr.bearing, bearing)) {
+					jumpTo.bearing = bearing;
+					changed = true;
 				}
-			}
+				if (pitch !== undefined && tr.pitch !== pitch) {
+					jumpTo.pitch = pitch;
+					changed = true;
+				}
+				if (roll !== undefined && tr.roll !== roll) {
+					jumpTo.roll = roll;
+					changed = true;
+				}
+				if (elevation !== undefined && tr.elevation !== elevation) {
+					jumpTo.elevation = elevation;
+					changed = true;
+				}
+				if (padding && !tr.isPaddingEqual(padding)) {
+					jumpTo.padding = padding;
+					changed = true;
+				}
+
+				if (changed) {
+					// Temporarily replace the camera's `stop` with `_stop(allowGestures: true)` so that
+					// ongoing gestures survive the `jumpTo` below.
+					const originalStop = camera.stop;
+					camera.stop = () => camera._stop(true);
+					try {
+						map.jumpTo(jumpTo, { reactivity: true });
+					} finally {
+						camera.stop = originalStop;
+					}
+				}
+			});
+
+			return () => {
+				cancelled = true;
+			};
 		}
 	});
 	$effect(() => {

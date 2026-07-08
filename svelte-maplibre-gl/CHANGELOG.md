@@ -1,5 +1,11 @@
 # svelte-maplibre-gl
 
+## Unreleased
+
+### Patch Changes
+
+- fix(MapLibre): defer reactive camera updates (`jumpTo`) to a microtask so child source `setTiles`/`setUrl` effects run first when tiles and zoom (or center) change in the same flush.
+
 ## 2.1.0
 
 ### Minor Changes
